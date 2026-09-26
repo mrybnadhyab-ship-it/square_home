@@ -1,0 +1,49 @@
+name: Import Square Home Project
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download project ZIP
+        run: |
+          curl -L \
+            "https://github.com/mrybnadhyab-ship-it/square_home/raw/main/square-home-start-overlay-ready.zip" \
+            -o project.zip
+
+      - name: Extract project
+        run: |
+          mkdir -p extracted
+          unzip -o project.zip -d extracted
+
+          shopt -s dotglob
+          for item in extracted/*; do
+            if [ "$(basename "$item")" != "__MACOSX" ]; then
+              cp -R "$item" .
+            fi
+          done
+
+          rm -f project.zip
+          rm -rf extracted
+
+      - name: Remove temporary workflow
+        run: |
+          rm -f .github/workflows/import-project.yml
+
+      - name: Commit project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          git commit -m "Import Square Home Start Overlay project" || echo "Nothing to commit"
+          git push
