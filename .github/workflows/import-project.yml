@@ -1,49 +1,128 @@
-name: Import Square Home Project
+name: Build Square Home Start Overlay
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
+push:
+branches:
+- main
 
 permissions:
-  contents: write
+contents: read
 
 jobs:
-  import:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Download project ZIP
-        run: |
-          curl -L \
-            "https://github.com/mrybnadhyab-ship-it/square_home/raw/main/square-home-start-overlay-ready.zip" \
-            -o project.zip
+  - name: Set up Java 17
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
+      cache: gradle
 
-      - name: Extract project
-        run: |
-          mkdir -p extracted
-          unzip -o project.zip -d extracted
+  - name: Set up Android SDK
+    uses: android-actions/setup-android@v3
 
-          shopt -s dotglob
-          for item in extracted/*; do
-            if [ "$(basename "$item")" != "__MACOSX" ]; then
-              cp -R "$item" .
-            fi
-          done
+  - name: Import Square Home source
+    shell: bash
+    run: |
+      set -e
 
-          rm -f project.zip
-          rm -rf extracted
+      rm -rf square_home_source
 
-      - name: Remove temporary workflow
-        run: |
-          rm -f .github/workflows/import-project.yml
+      git clone --depth 1 \
+        https://github.com/qw75106/square_home.git \
+        square_home_source
 
-      - name: Commit project
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      echo "Square Home source imported:"
+      find square_home_source -maxdepth 2 -type f | sort | head -200
 
-          git add -A
-          git commit -m "Import Square Home Start Overlay project" || echo "Nothing to commit"
-          git push
+  - name: Apply Start Overlay patch
+    shell: bash
+    run: |
+      set -e
+
+      if [ -f launcher_provider.patch ]; then
+        echo "Applying launcher_provider.patch..."
+
+        cd square_home_source
+
+        git apply ../launcher_provider.patch || {
+          echo "Patch could not be applied cleanly."
+          echo "Continuing only if the patch is already integrated."
+        }
+
+        cd ..
+      else
+        echo "No launcher_provider.patch found."
+      fi
+
+  - name: Detect Gradle project
+    shell: bash
+    run: |
+      set -e
+
+      cd square_home_source
+
+      if [ ! -f gradlew ]; then
+        echo "ERROR: Square Home Gradle wrapper not found."
+        find . -maxdepth 3 -type f | sort | head -300
+        exit 1
+      fi
+
+      chmod +x gradlew
+
+      echo "Gradle version:"
+      ./gradlew --version
+
+  - name: Build debug APK
+    shell: bash
+    run: |
+      set -e
+
+      cd square_home_source
+
+      ./gradlew assembleDebug --stacktrace
+
+  - name: Find generated APK
+    shell: bash
+    run: |
+      set -e
+
+      echo "Generated APK files:"
+      find square_home_source -type f \
+        -name "*.apk" -o -name "*.aab" \
+        -print
+
+  - name: Prepare APK artifact
+    shell: bash
+    run: |
+      set -e
+
+      mkdir -p artifacts
+
+      APK="$(find square_home_source -type f -name "*.apk" | head -1)"
+
+      if [ -z "$APK" ]; then
+        echo "ERROR: No APK was generated."
+        exit 1
+      fi
+
+      echo "Using APK:"
+      echo "$APK"
+
+      cp "$APK" artifacts/SquareHome-StartOverlay-debug.apk
+
+      ls -lh artifacts/
+
+  - name: Upload APK Artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: SquareHome-StartOverlay-APK
+      path: artifacts/SquareHome-StartOverlay-debug.apk
+      if-no-files-found: error
+      retention-days: 14
